@@ -49,15 +49,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
-# undetected_chromedriver — bypass Cloudflare/bot-detection Shopee
-# Install: pip install undetected-chromedriver
-try:
-    import undetected_chromedriver as uc
-    UC_AVAILABLE = True
-except ImportError:
-    UC_AVAILABLE = False
-    print("⚠️  undetected_chromedriver tidak tersedia. Shopee mungkin diblokir.")
-    print("   Jalankan: pip install undetected-chromedriver")
+
 
 warnings.filterwarnings("ignore")
 
@@ -115,7 +107,6 @@ PLATFORM_URLS = {
         "?st=product&q={query}&navsource=home"
         "&location=surabaya"   # pre-filter: hanya tampilkan penjual area Jatim
     ),
-    "Shopee":        "https://shopee.co.id/search?keyword={query}",
     "DepoBangunan":  "https://www.depobangunan.co.id/catalogsearch/result/?q={query}",
     "Mitra10":       "https://www.mitra10.com/catalogsearch/result/?q={query}",
 }
@@ -123,7 +114,6 @@ PLATFORM_URLS = {
 # Platform yang akan di-scrape (set True/False untuk enable/disable)
 PLATFORMS_ENABLED = {
     "Tokopedia":    True,
-    "Shopee":       True,
     "DepoBangunan": True,
     "Mitra10":      True,
 }
@@ -185,57 +175,6 @@ def create_driver(is_colab: bool = False) -> webdriver.Chrome:
     )
     return driver
 
-
-# ─── 3.2 Setup Driver Khusus Shopee (undetected_chromedriver) ───────
-def create_shopee_driver(is_colab: bool = False):
-    """
-    Driver khusus untuk Shopee menggunakan undetected_chromedriver.
-
-    Shopee menggunakan Cloudflare Bot Management yang mendeteksi:
-    - navigator.webdriver flag
-    - Canvas & WebGL fingerprint khas headless Chrome
-    - Chrome automation extension markers
-
-    undetected_chromedriver mem-patch semua ini secara otomatis.
-    Di Windows lokal, berjalan non-headless (window terbuka sebentar)
-    karena headless masih bisa dideteksi Shopee.
-    """
-    if is_colab or not UC_AVAILABLE:
-        # Fallback ke driver biasa kalau di Colab atau uc belum install
-        return create_driver(is_colab=is_colab)
-
-    opts = uc.ChromeOptions()
-    opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--lang=id-ID")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-    # headless=False — window Shopee akan muncul sebentar saat scraping.
-    # Ini DISENGAJA karena Shopee mendeteksi headless mode.
-    # Window akan otomatis tertutup setelah scraping selesai.
-    # Auto-detect versi Chrome agar version_main selalu matching
-    chrome_version = 146  # default fallback
-    try:
-        import subprocess
-        # Windows: baca versi Chrome dari registry
-        reg = subprocess.run(
-            ["reg", "query",
-             r"HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon",
-             "/v", "version"],
-            capture_output=True, text=True, timeout=5
-        )
-        match = re.search(r"(\d+)\.\d+\.\d+\.\d+", reg.stdout)
-        if match:
-            chrome_version = int(match.group(1))
-    except Exception:
-        pass
-    print(f"   🔍 Chrome version terdeteksi: {chrome_version}")
-
-    driver = uc.Chrome(options=opts, headless=False, version_main=chrome_version)
-    print(f"   🛡️  Shopee driver: undetected_chromedriver v{chrome_version} (bypass bot-detection)")
-    return driver
 
 
 # ─── 3.2 Auto-Scroll ──────────────────────────────────────────────
@@ -525,160 +464,6 @@ def scrape_tokopedia(driver: webdriver.Chrome,
                     sold=sold,
                     rating_text=rating_text,
                     url=link,
-                ))
-        except Exception as e:
-            print(f"      ⚠️  Skip card: {e}")
-            continue
-
-    print(f"      ✅ {len(results)} baris data berhasil diambil.")
-    return results
-
-
-# ─── 4.2 Shopee Scraper ───────────────────────────────────────────
-def scrape_shopee(driver: webdriver.Chrome,
-                  keyword: str,
-                  brand: str,
-                  scraped_at: str) -> list[dict]:
-    """Scrape halaman hasil pencarian Shopee.
-
-    Selector dikonfirmasi dari live DOM inspection:
-      kartu produk  → li[data-sqe='item']  ← STABLE data attribute
-      nama produk   → aria-label 'View product: ...'  ← STABLE
-      harga         → span 'Rp' + span angka bersebelahan
-      lokasi        → span.ml-[3px] (kota penjual)
-      rating        → div teks '5.0' (pola angka 1-5)
-      terjual       → tidak selalu muncul, text-based fallback
-    """
-    results = []
-    url = PLATFORM_URLS["Shopee"].format(query=quote_plus(keyword))
-    print(f"\n   🛍️  [Shopee] '{keyword}'")
-
-    try:
-        driver.get(url)
-
-        # uc.Chrome sudah bypass fingerprint Shopee otomatis.
-        # Hanya perlu dismiss popup bahasa jika muncul.
-        time.sleep(3)
-        try:
-            driver.execute_script("""
-                document.querySelectorAll('button, span').forEach(el => {
-                    if (el.textContent.trim() === 'Bahasa Indonesia') el.click();
-                });
-            """)
-            time.sleep(1)
-        except Exception:
-            pass
-
-        # Tunggu kartu produk — selector dikonfirmasi live
-        WebDriverWait(driver, WAIT_TIMEOUT + 8).until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "li[data-sqe='item']")
-            )
-        )
-        print("      ✅ Kartu produk Shopee terdeteksi.")
-    except TimeoutException:
-        print(f"      ⚠️  Timeout Shopee {WAIT_TIMEOUT+8}s — skip keyword ini.")
-        return results
-    except Exception as e:
-        print(f"      ❌ Error load Shopee: {e}")
-        return results
-
-    auto_scroll(driver, count=3, pause=2.5)
-
-    soup = BeautifulSoup(driver.page_source, "lxml")
-
-    # li[data-sqe='item'] — dikonfirmasi STABLE dari live inspection
-    cards = soup.select("li[data-sqe='item']")
-    print(f"      📦 {len(cards)} kartu produk ditemukan.")
-
-    for card in cards:
-        try:
-            # ── Nama Produk ───────────────────────────────────────────────
-            # aria-label="View product: [NAMA]" adalah yang paling stabil
-            name = None
-            view_link = card.select_one("a[aria-label*='View product']")
-            if view_link:
-                aria = view_link.get("aria-label", "")
-                name = re.sub(r"(?i)^view product:\s*", "", aria).strip() or None
-            # Fallback: div dengan line-clamp (nama produk di card body)
-            if not name:
-                name_el = card.select_one("div.whitespace-normal, div[class*='line-clamp']")
-                if name_el:
-                    name = name_el.get_text(strip=True) or None
-
-            # ── Harga ─────────────────────────────────────────────────
-            # Shopee split harga: <span>Rp</span><span>7.891.200</span>
-            # Gabungkan dua span bersebelahan
-            raw_price = None
-            spans = card.find_all("span")
-            for i, sp in enumerate(spans):
-                if sp.get_text(strip=True) == "Rp" and i + 1 < len(spans):
-                    angka = spans[i + 1].get_text(strip=True)
-                    if re.search(r"\d", angka):
-                        raw_price = "Rp" + angka
-                        break
-            # Fallback text-based
-            if not raw_price:
-                for el in card.find_all(["span", "div"]):
-                    txt = el.get_text(strip=True)
-                    if txt.startswith("Rp") and re.search(r"\d", txt):
-                        raw_price = txt
-                        break
-
-            # ── Lokasi ────────────────────────────────────────────────
-            # data-testid='a11y-label' dengan prefix 'location-' — STABLE
-            location = None
-            loc_el = card.select_one("[data-testid='a11y-label'][class*='location']")
-            if loc_el:
-                location = loc_el.get_text(strip=True)
-            # Fallback: span.ml-[3px] atau cek nama kota Jatim secara teks
-            if not location:
-                for sp in card.find_all("span"):
-                    txt = sp.get_text(strip=True)
-                    if (3 < len(txt) < 25
-                            and not re.search(r"(Rp|\d{3,}|terjual|\+)", txt)
-                            and len(sp.find_all(True)) == 0):
-                        location = txt
-                        break
-
-            # ── Jumlah Terjual ─────────────────────────────────────────────
-            sold = None
-            for txt in card.find_all(string=True):
-                t = str(txt).strip()
-                if "terjual" in t.lower() and len(t) < 30:
-                    sold = t
-                    break
-
-            # ── Rating ─────────────────────────────────────────────────
-            # Shopee menampilkan rating sebagai angka 'X.X' di div sendiri
-            rating_text = None
-            for el in card.find_all(["div", "span"]):
-                if len(el.find_all(True)) == 0:  # leaf element
-                    txt = el.get_text(strip=True)
-                    if re.match(r"^[1-5](\.\d)?$", txt):
-                        rating_text = txt
-                        break
-
-            # ── Link Produk ───────────────────────────────────────────────
-            link_el = card.select_one("a[aria-label*='View product'], a[href]")
-            link = None
-            if link_el and link_el.get("href"):
-                h = link_el["href"]
-                link = ("https://shopee.co.id" + h) if h.startswith("/") else h
-
-            if name or raw_price:
-                results.append(_build_row(
-                    scraped_at=scraped_at,
-                    platform="Shopee",
-                    keyword=keyword,
-                    brand=brand,
-                    name=name,
-                    raw_price=raw_price,
-                    shop=None,   # nama toko tidak tersedia di search card
-                    location=location,
-                    sold=sold,
-                    rating_text=rating_text,
-                    url=clean_url(link),
                 ))
         except Exception as e:
             print(f"      ⚠️  Skip card: {e}")
@@ -1056,17 +841,8 @@ def main(is_colab: bool = False) -> pd.DataFrame:
     all_data   = []
     scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # ── Buat driver reguler (Tokopedia, Depo, Mitra10) ───────────
+    # ── Buat driver (Tokopedia, Depo, Mitra10) ───────────
     driver = create_driver(is_colab=is_colab)
-
-    # ── Buat driver khusus Shopee (undetected_chromedriver) ───────
-    shopee_driver = None
-    if PLATFORMS_ENABLED.get("Shopee"):
-        try:
-            shopee_driver = create_shopee_driver(is_colab=is_colab)
-        except Exception as e:
-            print(f"   ⚠️  Gagal buat Shopee driver: {e}  → fallback ke driver reguler")
-            shopee_driver = driver
 
     print("🚀 Browser headless berhasil diinisialisasi.")
     print(f"   Waktu scraping : {scraped_at}")
@@ -1076,7 +852,6 @@ def main(is_colab: bool = False) -> pd.DataFrame:
 
     scraper_map = {
         "Tokopedia":    scrape_tokopedia,
-        "Shopee":       scrape_shopee,
         "DepoBangunan": scrape_depobangunan,
         "Mitra10":      scrape_mitra10,
     }
@@ -1104,11 +879,8 @@ def main(is_colab: bool = False) -> pd.DataFrame:
                 current += 1
                 print(f"   Progress : {current}/{total_combos}")
 
-                # Pilih driver yang tepat per platform
-                active_driver = shopee_driver if platform == "Shopee" and shopee_driver else driver
-
                 try:
-                    rows = scraper_map[platform](active_driver, keyword, brand, scraped_at)
+                    rows = scraper_map[platform](driver, keyword, brand, scraped_at)
                     all_data.extend(rows)
                 except Exception as e:
                     print(f"      ❌ Error platform {platform}: {e}")
@@ -1124,9 +896,7 @@ def main(is_colab: bool = False) -> pd.DataFrame:
 
     finally:
         driver.quit()
-        if shopee_driver and shopee_driver is not driver:
-            shopee_driver.quit()
-        print("\n🔒 Semua browser ditutup.")
+        print("\n🔒 Browser ditutup.")
 
     # ── Bangun DataFrame ──────────────────────────────────────────
     print("\n" + "=" * 65)

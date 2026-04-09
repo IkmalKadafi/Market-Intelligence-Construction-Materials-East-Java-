@@ -1,153 +1,114 @@
 # 📒 Panduan Lengkap — Market Intelligence Scraper (AAC / Bata Ringan)
 
-## Struktur File
-
-```
-Market-Intelligence-Construction-Materials-East-Java-/
-├── market_intel_scraper.py     ← Script utama (GUNAKAN INI)
-├── tokopedia_scraper.py        ← Versi lama (deprecated)
-├── data_scraping.ipynb         ← Notebook (paste kode dari script utama)
-└── PANDUAN_NOTEBOOK.md         ← File ini
-```
+Dokumen ini menjelaskan rancangan arsitektur data, alasan bisnis, dan teknis dari script scraper market intelligence untuk material konstruksi (khususnya Bata Ringan) di wilayah Jawa Timur.
 
 ---
 
-## Platform yang Di-Scrape
+## 1. Scraping Data Apa?
 
-| Platform | Status | Keterangan |
-|---|---|---|
-| ✅ Tokopedia | Aktif | Harga distributor independen, filter Jatim |
-| ✅ Shopee | Aktif | Volume retail kecil, JS-heavy |
-| ✅ Depo Bangunan | Aktif | Harga acuan retail resmi Jatim |
+Sistem ini melakukan **Web Scraping Market Intelligence** khusus untuk industri produk bahan bangunan beton ringan (*Autoclaved Aerated Concrete* / AAC) beserta produk penyertanya (seperti Semen Mortar). 
+
+Data yang diambil meliputi:
+- **Pricing Insight:** Harga asli di pasaran (SRP/Modern Trade maupun harga agen retail independen).
+- **Distribusi Geografis:** Melacak dimana sebuah produk brand dijual secara online.
+- **Tingkat Penjualan & Rating:** Mengukur sentimen konsumen dan estimasi pergerakan *market share* retail di lapangan.
+
+Data ini sangat krusial digunakan oleh tim *Sales & Marketing* (misal dari pabrikan/distributor) untuk menganalisis **Price Gap** (jarak harga dengan kompetitor seperti Citicon, Blesscon, Grand Elephant) dan **Retail Penetration** di arena digital region Jawa Timur.
 
 ---
 
-## Schema Kolom Output
+## 2. Struktur Data Output (Skema)
 
-| Kolom | Tipe | Deskripsi | Tujuan Analisis |
+Hasil dari web scraping diproses berlapis, dari data mentah (*raw DOM*) menjadi data numerik siap hitung, lalu disimpan dalam format **`.csv`**. Berikut adalah struktur tabel beserta tipe data dan relevansi analitiknya:
+
+| Nama Kolom | Tipe Data | Deskripsi | Tujuan Analisis (Konteks Sales) |
 |---|---|---|---|
-| `scraped_at` | Datetime | Waktu data diambil | Lacak fluktuasi harga mingguan/bulanan |
-| `platform` | String | Tokopedia / Shopee / DepoBangunan | Segmentasi per channel |
-| `search_keyword` | String | Kata kunci pencarian | Relevansi produk |
-| `brand_label` | String | Blesscon, Citicon, dll | Segmentasi brand |
-| `product_name` | String | Nama lengkap produk | Identifikasi spesifikasi (7.5cm vs 10cm) |
-| `price_numeric` | Integer | Harga bersih (angka) | Rata-rata & price gap antar brand |
-| `unit_type` | String | m3 / pcs / palet / rit | Normalisasi harga adil |
-| `store_name` | String | Nama toko / distributor | Pemain paling agresif |
-| `store_location` | String | Kota toko | Distribusi geografis |
-| `is_east_java` | Boolean | Apakah lokasi di Jatim | Filter regional |
-| `total_sold` | String | Jumlah terjual (raw) | Estimasi market share |
-| `total_sold_numeric` | Integer | Jumlah terjual (angka) | Kalkulasi market share |
-| `rating_product` | Float | Skor bintang | Persepsi kepuasan konsumen |
-| `product_url` | String | Link produk | Validasi data |
+| `scraped_at` | Datetime | Tanggal & waktu data diambil | Melacak fluktuasi harga mingguan/bulanan. |
+| `platform` | String | Sumber (Tokopedia / DepoBangunan / Mitra10) | Segmentasi harga berdasarkan channel penjualan. |
+| `search_keyword` | String | Kata kunci yang digunakan saat mencari | Mengetahui relevansi produk dengan pencarian. |
+| `brand_label` | String | Nama merk (Blesscon, Citicon, dll) | Kategori utama untuk perbandingan Internal vs Competitor. |
+| `product_name` | String | Nama lengkap produk di web/apps | Identifikasi spesifikasi (contoh: ukuran 7.5cm vs 10cm). |
+| `price_numeric` | Integer | Harga dalam angka (bersih dari "Rp" dll) | Menghitung rata-rata harga pasar dan price gap. |
+| `unit_type` | String | Satuan (m3, biji, atau palet) | Normalisasi harga agar bisa dibandingkan secara seimbang. |
+| `store_name` | String | Nama toko atau distributor | Mengidentifikasi pemain retail/distributor tumpang tindih. |
+| `store_location` | String | Lokasi kota (Surabaya, Sidoarjo, dll) | Analisis kekuatan distribusi per wilayah geografis. |
+| `is_east_java` | Boolean | Flag khusus wilayah Jatim | Menyingkirkan harga pencilan yang berasal dari luar target area. |
+| `total_sold` | String | Jumlah terjual (raw txt) | Catatan orisinil tulisan terjual dari app. |
+| `total_sold_numeric`| Integer | Angka murni dari jumlah barang terjual | Kalkulasi volume dan estimasi *market share*. |
+| `rating_product` | Float | Skor bintang produk (1.0 - 5.0) | Mengukur kepuasan pelanggan akan brand/toko. |
+| `product_url` | String | Link detail halaman produk | Untuk validasi dan audit rujukan referensi harga. |
 
 ---
 
-## Daftar Keyword (18 Total)
+## 3. Daftar Keyword & Fungsinya
 
-### Grup: Brand Awareness (8 keyword)
-| Keyword | Brand Label |
-|---|---|
-| Bata Ringan Blesscon | Blesscon |
-| Bata Ringan Citicon | Citicon |
-| Bata Ringan Grand Elephant | Grand Elephant |
-| Bata Ringan Falcon | Falcon |
-| Bata Ringan Hebel | Hebel |
-| Bata Ringan Prime Mortar | Prime Mortar |
-| Bata Ringan Focon | Focon |
-| Bata Ringan Great Wall | Great Wall |
+Script memakai list *query* spesifik yang dijalin guna mensimulasikan pencarian natural dari pelanggan di *search bar*. Terdapat **18 Keyword** utama yang dibagi menjadi 3 grup besar.
 
-### Grup: Spesifikasi & Regional (7 keyword)
-| Keyword | Brand Label |
-|---|---|
-| Bata Ringan Surabaya Murah | General |
-| Bata Ringan Sidoarjo Grosir | General |
-| Bata Ringan Gresik m3 | General |
-| Bata Ringan 7.5cm | General |
-| Bata Ringan 10cm | General |
-| Hebel Surabaya satu rit | Hebel |
-| Bata Ringan per kubik | General |
+### Grup A: Brand Awareness (8 Keyword)
+Mencari seberapa banyak produk dari merk tertentu muncul ketika user langsung mencari merknya.
+- `Bata Ringan Blesscon` (Brand: Blesscon)
+- `Bata Ringan Citicon` (Brand: Citicon)
+- `Bata Ringan Grand Elephant` (Brand: Grand Elephant)
+- `Bata Ringan Falcon` (Brand: Falcon)
+- `Bata Ringan Hebel` (Brand: Hebel / General term)
+- `Bata Ringan Prime Mortar` (Brand: Prime Mortar)
+- `Bata Ringan Focon` (Brand: Focon)
+- `Bata Ringan Great Wall` (Brand: Great Wall)
 
-### Grup: Cross-Selling Accessories (3 keyword)
-| Keyword | Brand Label |
-|---|---|
-| Semen Mortar Perekat Bata Ringan | Mortar/Accessories |
-| Mortar Instan Surabaya | Mortar/Accessories |
-| Thinbed Bata Ringan | Mortar/Accessories |
+### Grup B: Spesifikasi & Area Jatim / Natural Search (7 Keyword)
+Simulasi dari konsumen atau *sub-contractor* yang mencari berdasar lokasi, ukuran, atau satuan tanpa memikirkan merk (membantu mencari siapa *Market Leader* organik).
+- `Bata Ringan Surabaya Murah`
+- `Bata Ringan Sidoarjo Grosir`
+- `Bata Ringan Gresik m3`
+- `Bata Ringan 7.5cm`
+- `Bata Ringan 10cm`
+- `Hebel Surabaya satu rit`
+- `Bata Ringan per kubik`
+
+### Grup C: Cross-Selling & Aksesoris (3 Keyword)
+Menganalisis pendamping komplementer dari Bata Ringan, yaitu semen instan / perekat untuk mengetahui kombinasi logistik.
+- `Semen Mortar Perekat Bata Ringan`
+- `Mortar Instan Surabaya`
+- `Thinbed Bata Ringan`
 
 ---
 
-## Cara Pakai di Jupyter Notebook / Google Colab
+## 4. Pilihan Web / Platform & Alasannya
 
-### Opsi 1 — Jalankan langsung sebagai script
-```bash
-python market_intel_scraper.py
-```
+Sistem hanya men-scrape data dari platform yang relevan dengan **harga Retail Independent dan Modern Trade** di Jawa Timur.
 
-### Opsi 2 — Paste ke `data_scraping.ipynb`
-Salin isi `market_intel_scraper.py` ke dalam cell-cell notebook sesuai komentar `# CELL 1`, `# CELL 2`, dst.
+### ✅ Tokopedia
+- **Alasan Bisnis:** Tokopedia adalah barometer kuat untuk "Traditional Retail" atau "Toko Besi Independen" yang berjualan secara online atau para aplikator lokal.
+- **Kondisi Khusus:** Script di set default agar menempelkan tag pencarian `location=surabaya`. Algoritma Tokopedia sudah cukup cerdas untuk men-filter area cakupan *Gerbangkertosusila* (Surabaya, Gresik, Sidoarjo, dsk).
 
-Di **Google Colab**, tambahkan cell pertama:
+### ✅ Depo Bangunan
+- **Alasan Bisnis:** Merupakan salah satu pionir Supermarket Bahan Bangunan (*Modern Trade/Modern Retail*) di Indonesia dengan footprint kuat di Jawa Timur.
+- **Kondisi Khusus:** Harga di platform ini merupakan Standar Harga Eceran (SRP) resmi (berbeda drastis dengan banting-bantingan harga di Tokopedia) yang berguna jadi harga acuan/atap.
+
+### ✅ Mitra10
+- **Alasan Bisnis:** Pesaing kuat Depo Bangunan memperebutkan segmen *Modern Trade*. Harga di Mitra10 bisa menceritakan persaingan promo retail korporasi yang akan dirasakan langsung oleh end-user level menengah atas.
+- **Kondisi Khusus:** Menyajikan spesifikasi brand ternama secara akurat.
+
+### 🚫 Shopee (Dinonaktifkan)
+- **Mengapa tidak dipakai?** Shopee saat ini memiliki mekanisme proteksi *Cloudflare Bot Management* paling agresif dan cenderung memaksa tertutupnya sistem headless automation. 
+- Di samping hal teknis, profil Tokopedia ternyata telah sangat memenuhi porsi perwakilan e-commerce *open marketplace*, sehingga hilangnya data Shopee tidak mendistorsi representasi harga industri material konstruksi berat berskala besar di Jawa Timur secara bermakna.
+
+---
+
+## Memulai via Jupyter Notebook
+
+1. Buka Jupyter Notebook atau file `.ipynb`.
+2. Pastikan file script `market_intel_scraper.py` berada di direktori selevel. (Sudah clean dan tidak menggunakan code Shopee).
+3. Buat cell eksekusi:
 ```python
-!apt-get update -q && apt-get install -y -q chromium-browser chromium-chromedriver
-!pip install selenium webdriver-manager beautifulsoup4 pandas lxml -q
-```
+import importlib
+import market_intel_scraper
 
-Lalu saat memanggil `main()`, gunakan:
-```python
-df_result = main(is_colab=True)   # ← ganti ke True di Colab!
-```
+# Paksa reload modul jika sebelumnya pernah di import
+importlib.reload(market_intel_scraper)
 
----
-
-## Konfigurasi Lanjutan
-
-Edit bagian konstanta di awal file untuk menyesuaikan:
-
-```python
-# Enable/disable platform
-PLATFORMS_ENABLED = {
-    "Tokopedia":    True,
-    "Shopee":       False,   # ← nonaktifkan jika terlalu lambat
-    "DepoBangunan": True,
-}
-
-# Sesuaikan kecepatan scraping
-SCROLL_COUNT = 4        # lebih banyak = lebih lambat tapi lebih lengkap
-DELAY_MIN    = 3.5      # jeda minimum antar request (detik)
-DELAY_MAX    = 8.0      # jeda maksimum antar request (detik)
-```
-
----
-
-## Troubleshooting
-
-| Masalah | Solusi |
-|---|---|
-| `0 produk` di Tokopedia | Selector berubah — cek DevTools, update CSS di `scrape_tokopedia()` |
-| `0 produk` di Shopee | Shopee anti-bot aktif → coba tambah `WAIT_TIMEOUT` ke 30 |
-| `ChromeDriver error` | `pip install --upgrade webdriver-manager` |
-| Terblokir / CAPTCHA | Tambah `DELAY_MIN/MAX`, ganti User-Agent di `create_driver()` |
-| Colab tidak menemukan Chrome | Pastikan `is_colab=True` dan sudah install `chromium-browser` |
-
----
-
-## Contoh Analisis Lanjutan dari Output
-
-```python
 import pandas as pd
+df = market_intel_scraper.main(is_colab=False)
 
-df = pd.read_csv("raw_market_data_lightweight_concrete.csv")
-
-# 1. Rata-rata harga per brand per platform
-df.groupby(["brand_label","platform"])["price_numeric"].mean()
-
-# 2. Market share estimasi per brand (berdasarkan total sold)
-df.groupby("brand_label")["total_sold_numeric"].sum().sort_values(ascending=False)
-
-# 3. Filter hanya produk dari Jawa Timur
-df_jatim = df[df["is_east_java"] == True]
-
-# 4. Price benchmark per unit type
-df.groupby(["brand_label","unit_type"])["price_numeric"].agg(["min","mean","max"])
+df.head()
 ```
