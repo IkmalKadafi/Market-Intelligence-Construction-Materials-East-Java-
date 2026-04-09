@@ -1,4 +1,4 @@
-# 📒 Panduan Lengkap — Market Intelligence Scraper (AAC / Bata Ringan)
+# 📒 Note Scraper Market Intelligence (Bahan Bangunan)
 
 Dokumen ini menjelaskan rancangan arsitektur data, alasan bisnis, dan teknis dari script scraper market intelligence untuk material konstruksi (khususnya Bata Ringan) di wilayah Jawa Timur.
 
@@ -89,7 +89,7 @@ Sistem hanya men-scrape data dari platform yang relevan dengan **harga Retail In
 - **Alasan Bisnis:** Pesaing kuat Depo Bangunan memperebutkan segmen *Modern Trade*. Harga di Mitra10 bisa menceritakan persaingan promo retail korporasi yang akan dirasakan langsung oleh end-user level menengah atas.
 - **Kondisi Khusus:** Menyajikan spesifikasi brand ternama secara akurat.
 
-### 🚫 Shopee (Dinonaktifkan)
+### 🚫 Shopee (Tidak digunakan)
 - **Mengapa tidak dipakai?** Shopee saat ini memiliki mekanisme proteksi *Cloudflare Bot Management* paling agresif dan cenderung memaksa tertutupnya sistem headless automation. 
 - Di samping hal teknis, profil Tokopedia ternyata telah sangat memenuhi porsi perwakilan e-commerce *open marketplace*, sehingga hilangnya data Shopee tidak mendistorsi representasi harga industri material konstruksi berat berskala besar di Jawa Timur secara bermakna.
 
