@@ -1,4 +1,4 @@
-# Market Intelligence Scraper & Analytics Dashboard
+# Market Intelligence Analytics Dashboard
 **Market Intelligence of Lightweight Concrete (Bata Ringan) in East Java**
 
 ## Ringkasan Eksekutif (Problem Statement)
